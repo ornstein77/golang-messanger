@@ -1,0 +1,14 @@
+# Binaries
+/bin/
+*.exe
+*.out
+
+# Local data & logs
+/out/pgdata/
+/out/logs/*.log
+
+# Env (keep .env.example tracked; ignore real secrets if any)
+# .env
+
+# Go
+vendor/

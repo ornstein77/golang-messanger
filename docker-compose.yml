@@ -1,0 +1,70 @@
+name: todoapp
+
+services:
+  todoapp-postgres:
+    image: postgres:18.4-bookworm
+    container_name: todoapp-env-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-todoapp}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-todoapp}
+      POSTGRES_DB: ${POSTGRES_DB:-messenger}
+    # Postgres 18+ stores data in a version-specific subdirectory and requires a
+    # single mount at /var/lib/postgresql (not /var/lib/postgresql/data).
+    volumes:
+      - ./out/pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-todoapp} -d ${POSTGRES_DB:-messenger}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - todoapp
+
+  todoapp-postgres-migrate:
+    image: migrate/migrate:v4.19.1
+    container_name: todoapp-postgres-migrate
+    depends_on:
+      todoapp-postgres:
+        condition: service_healthy
+    volumes:
+      - ./migrations:/migrations:ro
+    command:
+      - "-path"
+      - "/migrations"
+      - "-database"
+      - "postgres://${POSTGRES_USER:-todoapp}:${POSTGRES_PASSWORD:-todoapp}@todoapp-postgres:5432/${POSTGRES_DB:-messenger}?sslmode=disable"
+      - "up"
+    restart: on-failure
+    networks:
+      - todoapp
+
+  port-forwarder:
+    image: alpine/socat:1.8.0.3
+    container_name: todoapp-postgres-port-forwarder
+    depends_on:
+      todoapp-postgres:
+        condition: service_healthy
+    command: tcp-listen:5432,fork,reuseaddr tcp-connect:todoapp-postgres:5432
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    networks:
+      - todoapp
+
+  swagger:
+    build:
+      context: ./
+      dockerfile_inline: |
+        FROM golang:1.25.5-alpine
+        RUN apk add --no-cache git
+        RUN go install github.com/swaggo/swag/cmd/swag@v1.16.6
+        WORKDIR /app
+    container_name: todoapp-swagger
+    volumes:
+      - ./:/app
+    command: ["swag", "init", "-g", "cmd/app/main.go", "-o", "docs"]
+
+networks:
+  todoapp:
+    name: todoapp-network
+    driver: bridge
