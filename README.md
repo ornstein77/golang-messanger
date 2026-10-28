@@ -1,176 +1,128 @@
-# Messenger backend
+# Серверная часть мессенджера
 
-A small messenger backend written in Go. Users register with a **nickname,
-password and phone number**, log in to receive a session token, then browse
-other users and exchange direct messages. This repository contains **only the
-server side** (no frontend).
+Небольшая серверная часть мессенджера, написанная на Go. Пользователи регистрируются, указывая **никнейм, пароль и номер телефона**, затем входят в систему и получают токен сессии. После этого они могут просматривать список других пользователей и обмениваться личными сообщениями. В репозитории находится **только серверная часть** — без пользовательского интерфейса.
 
-## Tech stack
+## Технологии
 
-- Go 1.25, standard-library `net/http` router (method-aware `ServeMux`)
-- PostgreSQL (via `jackc/pgx/v5` + `pgxpool`)
-- Versioned SQL migrations (`golang-migrate`)
-- Config from env (`kelseyhightower/envconfig`)
-- Structured logging (`go.uber.org/zap`)
-- Request validation (`go-playground/validator/v10`)
-- Swagger / OpenAPI docs (`swaggo/swag` + `swaggo/http-swagger`)
-- Password hashing with bcrypt (`golang.org/x/crypto`)
+- Go 1.25, маршрутизатор `net/http` из стандартной библиотеки с поддержкой маршрутов по HTTP-методам (`ServeMux`)
+- PostgreSQL через `jackc/pgx/v5` и `pgxpool`
+- Версионируемые SQL-миграции (`golang-migrate`)
+- Конфигурация из переменных окружения (`kelseyhightower/envconfig`)
+- Структурированное логирование (`go.uber.org/zap`)
+- Проверка входящих запросов (`go-playground/validator/v10`)
+- Документация Swagger / OpenAPI (`swaggo/swag` и `swaggo/http-swagger`)
+- Хеширование паролей с помощью bcrypt (`golang.org/x/crypto`)
 
-## Architecture
+## Архитектура
 
-```
-cmd/app                     # entrypoint (main.go)
-docs                        # generated swagger (docs.go)
+```text
+cmd/app                     # точка входа (main.go)
+docs                        # сгенерированная документация Swagger (docs.go)
 internal/
   core/
-    config                  # env-based configuration
-    domain                  # core entities (User, Session, Message)
-    errors                  # typed application errors + HTTP mapping
-    logger                  # zap logger factory
+    config                  # конфигурация из переменных окружения
+    domain                  # основные сущности (User, Session, Message)
+    errors                  # типизированные ошибки приложения и их сопоставление с HTTP-ответами
+    logger                  # создание логгера zap
     repository/postgres/
-      pool                  # pgxpool builder
-      pgx                   # shared Querier + pg error helpers
+      pool                  # создание пула подключений pgxpool
+      pgx                   # общий интерфейс Querier и обработчики ошибок PostgreSQL
     transport/http/
-      middleware            # recover, logging, CORS, auth
-      request               # JSON decode + validation
-      response              # JSON response/error envelope
-      server                # router assembly + http.Server lifecycle
-      types                 # response envelope + auth context helpers
+      middleware            # обработчики recover, логирования, CORS и аутентификации
+      request               # декодирование JSON и проверка запросов
+      response              # оболочка JSON-ответа или ошибки
+      server                # сборка маршрутизатора и жизненный цикл http.Server
+      types                 # оболочка ответов и вспомогательные средства для контекста аутентификации
   features/
-    auth                    # register / login / logout / session auth
+    auth                    # регистрация, вход, выход и проверка сессии
       repository | service | transport
-    users                   # list users / current profile
+    users                   # список пользователей и профиль текущего пользователя
       repository | service | transport
-    messages                # send message / conversation history
+    messages                # отправка сообщений и история переписки
       repository | service | transport
-migrations                  # versioned SQL (golang-migrate)
+migrations                  # версионируемые SQL-миграции (golang-migrate)
 out/
-  logs                      # application log files
-  pgdata                    # Postgres data (docker volume mount)
-.env                        # local configuration
-```
+  logs                      # файлы журналов приложения
+  pgdata                    # данные PostgreSQL (точка подключения тома Docker)
+.env                        # локальная конфигурация
+Каждая функциональная часть организована как вертикальный срез с тремя слоями, взаимодействующими друг с другом только через интерфейсы: repository (SQL-запросы) → service (бизнес-логика) → transport (HTTP).
+Конфигурация
+Все параметры читаются из переменных окружения (см. файл .env). Основные значения:
+Переменная	Значение по умолчанию	Описание
+HTTP_PORT	8080	Порт для HTTP-подключений
+POSTGRES_HOST	localhost	Адрес сервера PostgreSQL
+POSTGRES_PORT	5432	Порт PostgreSQL
+POSTGRES_USER	todoapp	Пользователь PostgreSQL
+POSTGRES_PASSWORD	todoapp	Пароль PostgreSQL
+POSTGRES_DB	messenger	Имя базы данных
+SESSION_TTL	720h	Срок действия токена сессии
+LOG_LEVEL	info	Уровень логирования zap
 
-Each feature is a vertical slice with three layers that talk to each other only
-through interfaces: `repository` (SQL) → `service` (business logic) →
-`transport` (HTTP).
 
-## Configuration
+Начало работы
+Только при первом запуске: загрузите зависимости (требуется доступ к сети).
+make tidy
 
-All configuration is read from environment variables (see `.env`). Key values:
-
-| Variable            | Default     | Description                    |
-| ------------------- | ----------- | ------------------------------ |
-| `HTTP_PORT`         | `8080`      | HTTP listen port               |
-| `POSTGRES_HOST`     | `localhost` | Postgres host                  |
-| `POSTGRES_PORT`     | `5432`      | Postgres port                  |
-| `POSTGRES_USER`     | `todoapp`   | Postgres user                  |
-| `POSTGRES_PASSWORD` | `todoapp`   | Postgres password              |
-| `POSTGRES_DB`       | `messenger` | Database name                  |
-| `SESSION_TTL`       | `720h`      | Session token lifetime         |
-| `LOG_LEVEL`         | `info`      | zap log level                  |
-
-## Getting started
-
-> First time only: fetch dependencies (requires network access).
->
-> ```bash
-> make tidy
-> ```
-
-### 1. Start Postgres, apply migrations, run the port-forwarder
-
-```bash
+1. Запустите PostgreSQL, примените миграции и включите перенаправление порта
 make compose-up
-```
-
-This starts `todoapp-postgres`, runs the `todoapp-postgres-migrate` job (applies
-`migrations/`), and exposes Postgres on `localhost:5432` through the
-`alpine/socat` port-forwarder.
-
-### 2. Run the server
-
-```bash
+Команда запускает todoapp-postgres, задачу todoapp-postgres-migrate для применения миграций из каталога migrations/ и перенаправляет подключения к PostgreSQL на localhost:5432 с помощью alpine/socat.
+2. Запустите сервер
 make run
-```
+API будет доступен по адресу http://localhost:8080.
+- Проверка работоспособности: GET /health
+- Интерфейс Swagger: http://localhost:8080/swagger/index.html
+Повторная генерация документации Swagger
+Базовая версия docs/docs.go включена в репозиторий. Чтобы заново сгенерировать документацию по аннотациям в коде, выполните:
+make swagger          # использует локальную программу swag
+# или
+make swagger-docker   # использует сервис Swagger в Docker Compose
+Обзор API
+Базовый путь: /api/v1. Все ответы имеют оболочку { "data": ... } или { "error": ... }. Для доступа к защищённым конечным точкам требуется заголовок Authorization: Bearer <token>.
+Метод	Путь	Аутентификация	Описание
+POST	/auth/register	нет	Регистрация (никнейм, пароль, телефон)
+POST	/auth/login	нет	Вход в систему; возвращает токен сессии
+POST	/auth/logout	да	Отзыв текущего токена
+GET	/users	да	Получение списка других пользователей
+GET	/users/me	да	Получение профиля текущего пользователя
+POST	/messages	да	Отправка сообщения пользователю
+GET	/messages?with=<uuid>	да	Получение переписки с пользователем
 
-The API listens on `http://localhost:8080`.
 
-- Health check: `GET /health`
-- Swagger UI: `http://localhost:8080/swagger/index.html`
-
-### Regenerating Swagger docs
-
-A baseline `docs/docs.go` is committed. Regenerate it from code annotations with:
-
-```bash
-make swagger          # local swag binary
-# or
-make swagger-docker   # uses the swagger docker-compose service
-```
-
-## API overview
-
-Base path: `/api/v1`. All responses use a `{ "data": ... }` / `{ "error": ... }`
-envelope. Protected endpoints require an `Authorization: Bearer <token>` header.
-
-| Method | Path             | Auth | Description                         |
-| ------ | ---------------- | ---- | ----------------------------------- |
-| POST   | `/auth/register` | no   | Register (nickname, password, phone)|
-| POST   | `/auth/login`    | no   | Log in, returns a session token     |
-| POST   | `/auth/logout`   | yes  | Revoke the current token            |
-| GET    | `/users`         | yes  | List other users                    |
-| GET    | `/users/me`      | yes  | Current user's profile              |
-| POST   | `/messages`      | yes  | Send a message to a user            |
-| GET    | `/messages?with=<uuid>` | yes | Conversation with a user       |
-
-### Example flow
-
-```bash
-# Register
+Пример последовательности действий
+# Регистрация
 curl -s http://localhost:8080/api/v1/auth/register \
   -H 'Content-Type: application/json' \
   -d '{"nickname":"alice","password":"s3cr3t-pass","phone":"+14155552671"}'
 
-# Log in -> copy data.token
+# Вход в систему -> скопируйте data.token
 curl -s http://localhost:8080/api/v1/auth/login \
   -H 'Content-Type: application/json' \
   -d '{"nickname":"alice","password":"s3cr3t-pass"}'
 
-TOKEN=... # from the login response
+TOKEN=... # токен из ответа на вход
 
-# List users to find someone to chat with
+# Получение списка пользователей, чтобы выбрать собеседника
 curl -s http://localhost:8080/api/v1/users -H "Authorization: Bearer $TOKEN"
 
-# Send a message
+# Отправка сообщения
 curl -s http://localhost:8080/api/v1/messages \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
-  -d '{"recipient_id":"<other-user-uuid>","body":"Hello!"}'
+  -d '{"recipient_id":"<uuid-другого-пользователя>","body":"Привет!"}'
 
-# Read the conversation
-curl -s "http://localhost:8080/api/v1/messages?with=<other-user-uuid>" \
+# Просмотр переписки
+curl -s "http://localhost:8080/api/v1/messages?with=<uuid-другого-пользователя>" \
   -H "Authorization: Bearer $TOKEN"
-```
-
-## Make targets
-
-Run `make help` to see everything. The most common:
-
-- `make tidy` – download/tidy dependencies
-- `make run` – run the server
-- `make build` – build `bin/app`
-- `make compose-up` – start Postgres + migrations + port-forwarder
-- `make compose-down` – stop the stack
-- `make migrate-up` – apply migrations
-- `make swagger` – regenerate Swagger docs
-
-## Notes
-
-- Authentication uses opaque session tokens (UUIDs) stored in the `sessions`
-  table, validated on every protected request.
-- Passwords are hashed with bcrypt and never returned by the API.
-- Database schema changes are versioned under `migrations/` and applied with
-  `golang-migrate`.
-- The Postgres 18 image stores data in a version-specific layout, so the
-  compose file mounts a single volume at `/var/lib/postgresql` (mapped to
-  `out/pgdata`) rather than the legacy `/var/lib/postgresql/data`.
-```
+Команды Make
+Выполните make help, чтобы увидеть полный список команд. Наиболее используемые:
+- make tidy — загрузка и упорядочивание зависимостей
+- make run — запуск сервера
+- make build — сборка bin/app
+- make compose-up — запуск PostgreSQL, миграций и перенаправления порта
+- make compose-down — остановка сервисов
+- make migrate-up — применение миграций
+- make swagger — повторная генерация документации Swagger
+Примечания
+- Для аутентификации используются непрозрачные токены сессий (UUID). Они хранятся в таблице sessions и проверяются при каждом защищённом запросе.
+- Пароли хешируются с помощью bcrypt и никогда не возвращаются через API.
+- Изменения схемы базы данных версионируются в каталоге migrations/ и применяются с помощью golang-migrate.
+- Образ PostgreSQL 18 хранит данные в структуре каталогов, зависящей от версии. Поэтому в файле Compose один том подключается к /var/lib/postgresql (сопоставленному с out/pgdata), а не к прежнему пути /var/lib/postgresql/data.
